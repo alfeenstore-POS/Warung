@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <link rel="manifest" href="manifest.json">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>WARUNG ALFEEN - Digital POS & PPOB</title>
@@ -54,14 +53,12 @@
         input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         .btn-active { transform: scale(0.95); transition: transform 0.1s; }
 
-        /* Optimasi Tampilan Kamera */
         #reader video, #reader-modal video {
             object-fit: cover !important;
             width: 100% !important;
             height: 100% !important;
         }
         
-        /* Menghilangkan elemen teks bawaan html5-qrcode */
         #reader__dashboard_section_swaplink, #reader-modal__dashboard_section_swaplink {
             display: none !important;
         }
@@ -73,7 +70,6 @@
     <script type="text/babel">
         const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
-        // === CONFIGURATION ===
         const SUPABASE_URL = "https://xhfhmtunsbechgnzgkur.supabase.co";
         const SUPABASE_KEY = "sb_publishable_-P2eIz6XnQ2a4xt4-3ANMQ_7nxWHYfD";
         const APP_NAME = "WARUNG ALFEEN";
@@ -82,7 +78,6 @@
         const ADMIN_FEE = 3000;
         const TOKEN_DENOMS = [20000, 50000, 100000, 200000, 500000];
 
-        // Init Supabase
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
         function App() {
@@ -96,6 +91,7 @@
             const [isFlashOn, setIsFlashOn] = useState(false);
             const [notification, setNotification] = useState(null);
             const [cashReceived, setCashReceived] = useState('');
+            const [discount, setDiscount] = useState(''); // Fitur Diskon
             const [lastReceipt, setLastReceipt] = useState(null);
             const [aiAnalysis, setAiAnalysis] = useState("");
             const [isAiLoading, setIsAiLoading] = useState(false);
@@ -115,14 +111,12 @@
                 } catch (e) { console.error("Sync Error", e); }
             };
 
-            // FUNGSI HAPUS PRODUK YANG DIPERBAIKI
             const deleteProduct = async (product) => {
                 const isConfirmed = window.confirm(`Apakah Anda yakin ingin menghapus "${product.name}"?`);
                 if (isConfirmed) {
                     try {
                         const { error } = await supabase.from('products').delete().eq('id', product.id);
                         if (error) {
-                            // Cek jika error karena foreign key (sudah ada di data sales)
                             if (error.code === '23503') {
                                 notify("Gagal: Produk ini sudah ada di riwayat penjualan", "error");
                             } else {
@@ -130,7 +124,7 @@
                             }
                         } else {
                             notify("Produk berhasil dihapus");
-                            fetchData(); // Refresh data setelah hapus
+                            fetchData();
                         }
                     } catch (e) {
                         notify("Terjadi kesalahan sistem", "error");
@@ -152,7 +146,9 @@
                 setTimeout(() => setNotification(null), 3000);
             };
 
-            const cartTotal = useMemo(() => cart.reduce((s, i) => s + (i.price * i.quantity), 0), [cart]);
+            // Kalkulasi Total dengan Diskon
+            const subtotal = useMemo(() => cart.reduce((s, i) => s + (i.price * i.quantity), 0), [cart]);
+            const cartTotal = useMemo(() => Math.max(0, subtotal - (Number(discount) || 0)), [subtotal, discount]);
             const changeAmount = cashReceived ? Number(cashReceived) - cartTotal : 0;
 
             const addToCart = (product) => {
@@ -188,14 +184,19 @@
 
             const checkout = async () => {
                 if (cart.length === 0 || Number(cashReceived) < cartTotal) return;
-                const profit = cart.reduce((sum, item) => {
+                
+                // Profit dikurangi diskon
+                const totalMargin = cart.reduce((sum, item) => {
                     const margin = item.type === 'ppob' ? ADMIN_FEE : (item.price - (item.cost_price || 0));
                     return sum + (margin * item.quantity);
                 }, 0);
+                
+                const finalProfit = totalMargin - (Number(discount) || 0);
 
                 const trxId = `TRX-${Date.now()}`;
                 const saleData = {
-                    id: trxId, items: cart, total: cartTotal, profit: profit,
+                    id: trxId, items: cart, total: cartTotal, profit: finalProfit,
+                    discount: Number(discount) || 0, subtotal: subtotal,
                     payment: Number(cashReceived), change_amount: changeAmount,
                     timestamp: new Date().toISOString()
                 };
@@ -208,31 +209,27 @@
                         }
                     }
                     setLastReceipt(saleData);
-                    setCart([]); setCashReceived(''); fetchData();
+                    setCart([]); setCashReceived(''); setDiscount(''); fetchData();
                     notify("Transaksi Berhasil!");
                 }
             };
 
-            // Logika Scanner yang Disempurnakan (Sama untuk Kasir & Stok)
             const startScanner = async (target = "reader") => {
                 const isMain = target === "reader";
                 if(isMain) setIsScanning(true); else setIsScanningModal(true);
 
-                // Delay kecil untuk memastikan elemen DOM siap
                 setTimeout(async () => {
                     const html5QrCode = new window.Html5Qrcode(target);
                     if(isMain) scannerRef.current = html5QrCode; else modalScannerRef.current = html5QrCode;
 
-                    // Konfigurasi khusus untuk Barcode (Persegi Panjang)
                     const config = {
-                        fps: 30, // FPS lebih tinggi agar responsif
+                        fps: 30,
                         qrbox: (viewfinderWidth, viewfinderHeight) => {
-                            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
                             const qrboxWidth = Math.floor(viewfinderWidth * 0.8);
-                            const qrboxHeight = Math.floor(qrboxWidth * 0.45); // Rasio Barcode
+                            const qrboxHeight = Math.floor(qrboxWidth * 0.45);
                             return { width: qrboxWidth, height: qrboxHeight };
                         },
-                        aspectRatio: 1.0 // Rasio kotak untuk container luar
+                        aspectRatio: 1.0
                     };
 
                     try {
@@ -243,13 +240,11 @@
                                 if(isMain) {
                                     const product = inventory.find(i => i.barcode === decodedText);
                                     if (product) {
-                                        // MEMATIKAN KAMERA SETELAH BERHASIL SCAN
                                         stopScanner("reader"); 
                                         addToCart(product);
                                         if(navigator.vibrate) navigator.vibrate(80);
                                     } else notify("Produk tidak dikenal", "error");
                                 } else {
-                                    // Untuk Modal Stok
                                     const input = document.getElementById('product_barcode');
                                     if(input) input.value = decodedText;
                                     stopScanner("reader-modal");
@@ -348,7 +343,7 @@
 
                     {notification && (
                         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] px-6 py-3 rounded-2xl shadow-2xl font-bold text-sm bg-slate-900 text-white flex items-center gap-2 animate-in slide-in-from-top-4 border border-white/10">
-                            <div className={`w-2 h-2 rounded-full ${notification.type === 'error' ? 'bg-rose-500 shadow-[0_0_10px_red]' : 'bg-emerald-400 shadow-[0_0_10px_#4ade80]'}`}></div>
+                            <div className={`w-2 h-2 rounded-full ${notification.type === 'error' ? 'bg-rose-500' : 'bg-emerald-400'}`}></div>
                             {notification.msg}
                         </div>
                     )}
@@ -361,9 +356,9 @@
                                     <div className="flex gap-3">
                                         <div className="relative flex-1 group">
                                             <i data-lucide="search" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 transition-colors group-focus-within:text-indigo-500"></i>
-                                            <input type="text" placeholder="Cari nama barang..." className="w-full pl-12 pr-4 py-4 bg-white rounded-2xl border shadow-sm outline-none focus:ring-2 ring-indigo-500 font-semibold" onChange={e => setSearchTerm(e.target.value)} />
+                                            <input type="text" placeholder="Cari nama barang..." className="w-full pl-12 pr-4 py-4 bg-white rounded-2xl border shadow-sm outline-none focus:ring-2 ring-indigo-50 font-semibold" onChange={e => setSearchTerm(e.target.value)} />
                                         </div>
-                                        <button onClick={() => isScanning ? stopScanner("reader") : startScanner("reader")} className={`px-6 rounded-2xl font-bold flex items-center gap-2 shadow-lg transition-all active:scale-95 ${isScanning ? 'bg-rose-500 text-white shadow-rose-200' : 'bg-indigo-600 text-white shadow-indigo-200'}`}>
+                                        <button onClick={() => isScanning ? stopScanner("reader") : startScanner("reader")} className={`px-6 rounded-2xl font-bold flex items-center gap-2 shadow-lg transition-all active:scale-95 ${isScanning ? 'bg-rose-500 text-white' : 'bg-indigo-600 text-white'}`}>
                                             <i data-lucide={isScanning ? "x" : "camera"}></i>
                                             <span className="hidden md:inline">{isScanning ? 'Batal' : 'Scan'}</span>
                                         </button>
@@ -376,17 +371,12 @@
                                             <button onClick={() => toggleFlash("reader")} className="absolute top-4 right-4 z-20 p-3 bg-black/40 backdrop-blur-md text-white rounded-full border border-white/20 hover:bg-black/60 transition-colors">
                                                 <i data-lucide="zap" className={isFlashOn ? 'text-yellow-400' : ''}></i>
                                             </button>
-                                            {/* Masking overlay for focus */}
-                                            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                                                <div className="w-[85%] h-[45%] border-2 border-indigo-400/40 rounded-2xl bg-white/5"></div>
-                                            </div>
                                         </div>
                                     )}
 
                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                                         {inventory.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
                                             <button key={p.id} onClick={() => addToCart(p)} className="bg-white p-5 rounded-3xl border-2 border-transparent hover:border-indigo-500 shadow-sm hover:shadow-xl transition-all text-left flex flex-col h-full group active:scale-95 relative overflow-hidden">
-                                                <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity"><i data-lucide="plus-circle" className="text-indigo-500 w-5"></i></div>
                                                 <span className="text-[10px] font-black uppercase text-indigo-500 bg-indigo-50 px-2.5 py-1 rounded-lg w-fit mb-3">{p.category}</span>
                                                 <h3 className="font-bold text-sm text-slate-800 flex-1 leading-tight mb-2">{p.name}</h3>
                                                 <div className="mt-auto flex justify-between items-end">
@@ -398,23 +388,23 @@
                                     </div>
                                 </div>
 
-                                {/* Keranjang Samping */}
+                                {/* Keranjang Samping dengan Fitur Diskon */}
                                 <div className="bg-white rounded-[2.5rem] border-4 border-white shadow-2xl flex flex-col h-fit sticky top-8 overflow-hidden">
                                     <div className="p-6 border-b bg-slate-50/50 flex justify-between items-center">
                                         <div className="flex items-center gap-2">
                                             <i data-lucide="shopping-cart" className="w-5 text-indigo-600"></i>
                                             <h2 className="font-black text-lg uppercase tracking-tight">Keranjang</h2>
                                         </div>
-                                        <button onClick={() => setCart([])} className="text-[10px] font-black text-rose-400 hover:text-rose-600 uppercase tracking-widest">Hapus Semua</button>
+                                        <button onClick={() => {setCart([]); setDiscount('');}} className="text-[10px] font-black text-rose-400 hover:text-rose-600 uppercase tracking-widest">Hapus Semua</button>
                                     </div>
-                                    <div className="p-6 space-y-4 max-h-[45vh] overflow-y-auto custom-scrollbar">
+                                    <div className="p-6 space-y-4 max-h-[40vh] overflow-y-auto custom-scrollbar">
                                         {cart.length === 0 ? (
                                             <div className="py-16 text-center space-y-3 opacity-20">
                                                 <i data-lucide="shopping-bag" className="w-12 h-12 mx-auto"></i>
                                                 <p className="text-[10px] font-black uppercase tracking-[0.2em]">Belum Ada Barang</p>
                                             </div>
                                         ) : cart.map((it, idx) => (
-                                            <div key={idx} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-white hover:bg-white hover:shadow-md transition-all">
+                                            <div key={idx} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-white transition-all">
                                                 <div className="flex-1 pr-4">
                                                     <p className="text-xs font-black text-slate-800 line-clamp-1">{it.name}</p>
                                                     <div className="flex items-center gap-3 mt-2">
@@ -429,11 +419,24 @@
                                             </div>
                                         ))}
                                     </div>
+                                    
                                     <div className="p-8 bg-slate-50 border-t space-y-5">
-                                        <div className="flex justify-between items-end">
-                                            <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Total Tagihan</span>
-                                            <span className="text-4xl font-black text-slate-900 tracking-tighter leading-none">{CURRENCY} {cartTotal.toLocaleString()}</span>
+                                        <div className="space-y-2">
+                                            <div className="flex justify-between items-center px-2">
+                                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Subtotal</span>
+                                                <span className="text-sm font-bold text-slate-600">{CURRENCY} {subtotal.toLocaleString()}</span>
+                                            </div>
+                                            {/* INPUT DISKON */}
+                                            <div className="relative">
+                                                <i data-lucide="tag" className="absolute left-4 top-1/2 -translate-y-1/2 text-rose-400 w-4"></i>
+                                                <input type="number" placeholder="Diskon (Rp)..." className="w-full pl-10 pr-4 py-3 bg-white rounded-xl font-bold text-rose-600 shadow-sm outline-none border border-rose-100" value={discount} onChange={e => setDiscount(e.target.value)} />
+                                            </div>
+                                            <div className="flex justify-between items-end pt-2">
+                                                <span className="text-[11px] font-black text-indigo-500 uppercase tracking-widest mb-1">Total Tagihan</span>
+                                                <span className="text-4xl font-black text-slate-900 tracking-tighter leading-none">{CURRENCY} {cartTotal.toLocaleString()}</span>
+                                            </div>
                                         </div>
+
                                         {cart.length > 0 && (
                                             <div className="space-y-4 pt-2">
                                                 <div className="relative">
@@ -553,13 +556,7 @@
                                                         <td className="p-10">
                                                             <div className="flex justify-center gap-4">
                                                                 <button onClick={() => { setEditingItem(p); setIsModalOpen(true); }} className="p-5 bg-slate-50 rounded-2xl text-slate-400 hover:bg-indigo-600 hover:text-white transition-all shadow-sm active:scale-90"><i data-lucide="edit-3" className="w-5"></i></button>
-                                                                {/* TOMBOL HAPUS YANG DIPERBAIKI */}
-                                                                <button 
-                                                                    onClick={() => deleteProduct(p)} 
-                                                                    className="p-5 bg-rose-50 rounded-2xl text-rose-300 hover:bg-rose-500 hover:text-white transition-all shadow-sm active:scale-90"
-                                                                >
-                                                                    <i data-lucide="trash-2" className="w-5"></i>
-                                                                </button>
+                                                                <button onClick={() => deleteProduct(p)} className="p-5 bg-rose-50 rounded-2xl text-rose-300 hover:bg-rose-500 hover:text-white transition-all shadow-sm active:scale-90"><i data-lucide="trash-2" className="w-5"></i></button>
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -575,15 +572,15 @@
                         {activeTab === 'history' && (
                             <div className="space-y-10 animate-in fade-in max-w-6xl mx-auto">
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
-                                    <StatCard label="Total Omzet" val={sales.reduce((a,b)=>a+b.total,0)} color="indigo" />
-                                    <StatCard label="Total Laba" val={sales.reduce((a,b)=>a+b.profit,0)} color="emerald" />
+                                    <StatCard label="Total Omzet" val={sales.reduce((a,b)=>a+(Number(b.total)||0),0)} color="indigo" />
+                                    <StatCard label="Total Laba" val={sales.reduce((a,b)=>a+(Number(b.profit)||0),0)} color="emerald" />
                                     <StatCard label="Transaksi" val={sales.length} color="amber" noCurrency />
                                 </div>
                                 <div className="bg-white rounded-[3.5rem] border-4 border-white shadow-2xl overflow-hidden">
                                     <div className="p-10 border-b bg-slate-50/50 flex justify-between items-center">
                                         <h3 className="font-black uppercase text-xs tracking-widest">Daftar Transaksi Cloud</h3>
                                         <button onClick={() => {
-                                            const csv = "ID,Waktu,Total,Untung\n" + sales.map(s => `${s.id},${s.timestamp},${s.total},${s.profit}`).join("\n");
+                                            const csv = "ID,Waktu,Subtotal,Diskon,Total,Untung\n" + sales.map(s => `${s.id},${s.timestamp},${s.subtotal || s.total},${s.discount || 0},${s.total},${s.profit}`).join("\n");
                                             const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'})); a.download = 'Laporan_Alfeen.csv'; a.click();
                                         }} className="text-[10px] font-black text-indigo-600 bg-white border-2 border-indigo-100 px-6 py-3 rounded-[1.2rem] shadow-sm hover:bg-indigo-50 transition-colors">EXPORT EXCEL</button>
                                     </div>
@@ -604,6 +601,7 @@
                                                 <div className="flex items-center gap-8 justify-between md:justify-end">
                                                     <div className="text-right">
                                                         <p className="font-black text-indigo-600 text-2xl tracking-tighter leading-none">{CURRENCY} {s.total.toLocaleString()}</p>
+                                                        {s.discount > 0 && <p className="text-[10px] font-bold text-rose-400 mt-1">Diskon: -{s.discount.toLocaleString()}</p>}
                                                         <div className="flex items-center gap-1.5 justify-end mt-2">
                                                             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
                                                             <p className="text-[11px] font-black text-emerald-600 uppercase">Untung: {CURRENCY} {s.profit.toLocaleString()}</p>
@@ -679,10 +677,6 @@
                                                 <button type="button" onClick={() => toggleFlash("reader-modal")} className="absolute top-6 right-6 z-20 p-4 bg-black/40 backdrop-blur-md text-white rounded-full border border-white/10">
                                                     <i data-lucide="zap" className={isFlashOn ? 'text-yellow-400' : ''}></i>
                                                 </button>
-                                                {/* Masking overlay for focus */}
-                                                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                                                    <div className="w-[85%] h-[40%] border-2 border-indigo-400/50 rounded-2xl bg-white/5 shadow-[0_0_100px_rgba(99,102,241,0.2)]"></div>
-                                                </div>
                                             </div>
                                         )}
                                     </div>
@@ -693,17 +687,17 @@
                                     <div className="grid grid-cols-2 gap-6">
                                         <div className="space-y-2">
                                             <label className="text-[11px] font-black text-slate-400 uppercase ml-2 tracking-widest">Harga Jual</label>
-                                            <input name="price" defaultValue={editingItem?.price} type="number" required placeholder="0" className="w-full p-6 bg-indigo-50 rounded-[1.8rem] font-black text-indigo-700 text-3xl text-center outline-none border-4 border-transparent focus:border-indigo-200" />
+                                            <input name="price" defaultValue={editingItem?.price} type="number" required className="w-full p-6 bg-indigo-50 rounded-[1.8rem] font-black text-indigo-700 text-3xl text-center outline-none border-4 border-transparent focus:border-indigo-200" />
                                         </div>
                                         <div className="space-y-2">
                                             <label className="text-[11px] font-black text-slate-400 uppercase ml-2 tracking-widest">Harga Modal</label>
-                                            <input name="cost_price" defaultValue={editingItem?.cost_price} type="number" required placeholder="0" className="w-full p-6 bg-slate-50 rounded-[1.8rem] font-black text-slate-400 text-2xl text-center outline-none border-4 border-transparent focus:border-slate-200" />
+                                            <input name="cost_price" defaultValue={editingItem?.cost_price} type="number" required className="w-full p-6 bg-slate-50 rounded-[1.8rem] font-black text-slate-400 text-2xl text-center outline-none border-4 border-transparent focus:border-slate-200" />
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-6">
                                         <div className="space-y-2">
                                             <label className="text-[11px] font-black text-slate-400 uppercase ml-2 tracking-widest">Stok Saat Ini</label>
-                                            <input name="stock" defaultValue={editingItem?.stock} type="number" required placeholder="0" className="w-full p-6 bg-slate-50 rounded-[1.8rem] font-black text-slate-800 text-3xl text-center outline-none border-4 border-transparent focus:border-emerald-100" />
+                                            <input name="stock" defaultValue={editingItem?.stock} type="number" required className="w-full p-6 bg-slate-50 rounded-[1.8rem] font-black text-slate-800 text-3xl text-center outline-none border-4 border-transparent focus:border-emerald-100" />
                                         </div>
                                         <div className="space-y-2">
                                             <label className="text-[11px] font-black text-slate-400 uppercase ml-2 tracking-widest">Kategori</label>
@@ -718,7 +712,7 @@
                         </div>
                     )}
 
-                    {/* Modal Struk Digital */}
+                    {/* Modal Struk Digital dengan Diskon */}
                     {lastReceipt && (
                         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl z-[2000] flex items-center justify-center p-6 overflow-y-auto">
                             <div className="bg-white w-full max-w-sm rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 my-auto relative">
@@ -735,7 +729,7 @@
                                         {(lastReceipt.items || []).map((it, idx) => (
                                             <div key={idx} className="flex justify-between text-xs items-start group">
                                                 <div className="flex-1 pr-6 leading-tight">
-                                                    <p className="font-black text-slate-900 group-hover:text-indigo-600 transition-colors">{it.name}</p>
+                                                    <p className="font-black text-slate-900">{it.name}</p>
                                                     {it.meterId && <p className="text-[8px] text-indigo-500 font-bold mt-1 tracking-widest">ID PEL: {it.meterId}</p>}
                                                     <p className="text-[9px] font-bold text-slate-400 mt-1">{it.quantity} x {it.price.toLocaleString()}</p>
                                                 </div>
@@ -744,6 +738,12 @@
                                         ))}
                                     </div>
                                     <div className="border-t border-dashed border-slate-200 pt-10 space-y-4">
+                                        {lastReceipt.discount > 0 && (
+                                            <>
+                                                <div className="flex justify-between text-[11px] font-black text-slate-400"><span>SUBTOTAL</span><span>{(lastReceipt.subtotal || lastReceipt.total + lastReceipt.discount).toLocaleString()}</span></div>
+                                                <div className="flex justify-between text-[11px] font-black text-rose-500 italic"><span>DISKON</span><span>-{lastReceipt.discount.toLocaleString()}</span></div>
+                                            </>
+                                        )}
                                         <div className="flex justify-between font-black text-2xl text-indigo-600 tracking-tighter"><span>TOTAL</span><span>{lastReceipt.total.toLocaleString()}</span></div>
                                         <div className="flex justify-between text-[10px] font-black text-slate-400"><span>BAYAR</span><span>{lastReceipt.payment.toLocaleString()}</span></div>
                                         <div className="flex justify-between text-[10px] font-black text-emerald-600 uppercase tracking-widest pt-2 border-t border-slate-50"><span>KEMBALIAN</span><span>{lastReceipt.change_amount.toLocaleString()}</span></div>
@@ -791,9 +791,6 @@
                             {!noCurrency && CURRENCY + ' '} {val.toLocaleString()}
                         </p>
                     </div>
-                </div>
-                <div className="absolute -right-8 -bottom-8 opacity-5 text-slate-900 group-hover:rotate-12 transition-transform duration-1000">
-                    <i data-lucide="bar-chart-3" className="w-40 h-40"></i>
                 </div>
             </div>
         );

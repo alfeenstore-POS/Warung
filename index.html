@@ -124,6 +124,27 @@
                 return { totalRevenue, totalProfit, todayRevenue, todayProfit, totalTransactions: sales.length };
             }, [sales]);
 
+            const updateCartQty = (idx, delta) => {
+                const newCart = [...cart];
+                const item = newCart[idx];
+                const newQty = item.quantity + delta;
+
+                if (newQty <= 0) {
+                    // Hapus jika jumlah jadi 0
+                    newCart.splice(idx, 1);
+                } else {
+                    // Validasi stok jika bukan PPOB
+                    if (item.type !== 'ppob') {
+                        const product = inventory.find(p => p.id === item.id);
+                        if (product && newQty > product.stock) {
+                            return notify("Batas stok tercapai!", "error");
+                        }
+                    }
+                    newCart[idx].quantity = newQty;
+                }
+                setCart(newCart);
+            };
+
             const addToCart = (p) => {
                 if (p.type !== 'ppob' && p.stock <= 0) return notify("Stok habis!", "error");
                 setCart(prev => {

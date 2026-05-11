@@ -93,6 +93,37 @@
             const cartTotal = useMemo(() => Math.max(0, subtotal - (Number(discount) || 0)), [subtotal, discount]);
             const changeAmount = cashReceived ? Number(cashReceived) - cartTotal : 0;
 
+            const stats = useMemo(() => {
+                if (!sales || !Array.isArray(sales)) return { 
+                    totalRevenue: 0, totalProfit: 0, 
+                    todayRevenue: 0, todayProfit: 0,
+                    totalTransactions: 0 
+                };
+                
+                const today = new Date().toLocaleDateString('en-CA'); // Format YYYY-MM-DD
+                
+                let totalRevenue = 0;
+                let totalProfit = 0;
+                let todayRevenue = 0;
+                let todayProfit = 0;
+
+                sales.forEach(s => {
+                    const amount = Number(s.total) || 0;
+                    const profit = Number(s.profit) || 0;
+                    const saleDate = new Date(s.timestamp).toLocaleDateString('en-CA');
+
+                    totalRevenue += amount;
+                    totalProfit += profit;
+
+                    if (saleDate === today) {
+                        todayRevenue += amount;
+                        todayProfit += profit;
+                    }
+                });
+
+                return { totalRevenue, totalProfit, todayRevenue, todayProfit, totalTransactions: sales.length };
+            }, [sales]);
+
             const addToCart = (p) => {
                 if (p.type !== 'ppob' && p.stock <= 0) return notify("Stok habis!", "error");
                 setCart(prev => {
@@ -201,11 +232,8 @@
             const runAI = async () => {
                 setIsAiLoading(true);
                 try {
-                    const rev = sales.reduce((a, b) => a + (b.total || 0), 0);
-                    const prof = sales.reduce((a, b) => a + (b.profit || 0), 0);
                     const low = inventory.filter(i => i.stock < 10).map(i => i.name).join(", ");
-                    
-                    const prompt = `Analisis Warung Alfeen: Total Omzet Rp${rev}, Total Laba Rp${prof}, Transaksi ${sales.length}. Stok rendah: ${low || 'Semua aman'}. Berikan ringkasan performa dan 3 saran strategi singkat agar untung naik bulan depan.`;
+                    const prompt = `Analisis Warung Alfeen: Hari ini Omzet Rp${stats.todayRevenue}, Laba Rp${stats.todayProfit}. Total Omzet Rp${stats.totalRevenue}, Total Laba Rp${stats.totalProfit}. Stok rendah: ${low || 'Aman'}. Berikan ringkasan performa dan 3 saran strategi singkat.`;
                     
                     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -213,7 +241,7 @@
                     });
                     const data = await res.json();
                     setAiAnalysis(data.candidates[0].content.parts[0].text);
-                } catch (e) { setAiAnalysis("Maaf, AI sedang beristirahat. Pastikan data penjualan sudah ada."); }
+                } catch (e) { setAiAnalysis("AI sedang beristirahat."); }
                 finally { setIsAiLoading(false); }
             };
 
@@ -227,13 +255,12 @@
                     link.click();
                     notify("Struk Tersimpan!");
                 }).catch(err => {
-                    notify("Gagal download: " + err.message, "error");
+                    notify("Gagal download", "error");
                 });
             };
 
             return (
                 <div className="min-h-screen pb-24 lg:pb-0 lg:pl-64 flex flex-col">
-                    {}
                     <aside className="hidden lg:flex fixed left-0 top-0 h-full w-64 bg-slate-900 text-white flex-col p-6 z-50">
                         <div className="mb-10"><h1 className="text-2xl font-black text-indigo-400 italic">ALFEEN POS</h1></div>
                         <nav className="space-y-2">
@@ -241,11 +268,10 @@
                             <NavBtn id="ppob" icon="zap" label="Listrik" active={activeTab} set={setActiveTab} />
                             <NavBtn id="inventory" icon="package" label="Stok" active={activeTab} set={setActiveTab} />
                             <NavBtn id="history" icon="history" label="Rekap" active={activeTab} set={setActiveTab} />
-                            <NavBtn id="ai" icon="brain-circuit" label="Analisis AI" active={activeTab} set={setActiveTab} />
+                            <NavBtn id="ai" icon="brain-circuit" label="Asisten AI" active={activeTab} set={setActiveTab} />
                         </nav>
                     </aside>
 
-                    {}
                     <nav className="lg:hidden fixed bottom-0 left-0 w-full glass-nav z-[100] px-4 py-3 flex justify-around items-center">
                         <MobileNavBtn id="cashier" icon="layout-dashboard" active={activeTab} set={setActiveTab} />
                         <MobileNavBtn id="ppob" icon="zap" active={activeTab} set={setActiveTab} />
@@ -254,8 +280,14 @@
                         <MobileNavBtn id="ai" icon="brain-circuit" active={activeTab} set={setActiveTab} />
                     </nav>
 
+                    {notification && (
+                        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] px-6 py-3 rounded-2xl bg-slate-900 text-white font-bold text-xs flex items-center gap-2 shadow-2xl animate-in slide-in-from-top-4">
+                            <div className={`w-2 h-2 rounded-full ${notification.type === 'error' ? 'bg-rose-500' : 'bg-emerald-400'}`}></div>
+                            {notification.msg}
+                        </div>
+                    )}
+
                     <main className="flex-1 p-4 md:p-8 w-full max-w-7xl mx-auto">
-                        {/* Tab Kasir */}
                         {activeTab === 'cashier' && (
                             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
                                 <div className="xl:col-span-2 space-y-6">
@@ -267,7 +299,7 @@
                                         <div className="relative aspect-video rounded-3xl overflow-hidden bg-black border-4 border-white shadow-2xl">
                                             <div id="reader" className="w-full h-full"></div>
                                             <div className="animate-scanner-line"></div>
-                                            <button onClick={() => toggleFlash("reader")} className="absolute top-4 right-4 z-20 p-4 bg-black/40 backdrop-blur-md text-white rounded-full border border-white/20">
+                                            <button onClick={() => toggleFlash("reader")} className="absolute top-4 right-4 z-20 p-4 bg-black/40 backdrop-blur-md text-white rounded-full border border-white/10">
                                                 <i data-lucide="zap" className={isFlashOn ? 'text-yellow-400' : ''}></i>
                                             </button>
                                         </div>
@@ -290,18 +322,9 @@
                                             <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 rounded-2xl border border-white">
                                                 <div className="flex-1 pr-4"><p className="text-xs font-black leading-tight">{it.name}</p>
                                                 <div className="flex items-center gap-3 mt-1">
-                                                    <button onClick={() => {
-                                                        const n = [...cart];
-                                                        if(n[idx].quantity > 1) n[idx].quantity--;
-                                                        else n.splice(idx, 1);
-                                                        setCart(n);
-                                                    }} className="w-7 h-7 bg-white rounded-lg shadow-sm border">-</button>
+                                                    <button onClick={() => updateCartQty(idx, -1)} className="w-7 h-7 bg-white rounded-lg shadow-sm border">-</button>
                                                     <span className="text-xs font-black">{it.quantity}</span>
-                                                    <button onClick={() => {
-                                                        const n = [...cart];
-                                                        n[idx].quantity++;
-                                                        setCart(n);
-                                                    }} className="w-7 h-7 bg-white rounded-lg shadow-sm border">+</button>
+                                                    <button onClick={() => updateCartQty(idx, 1)} className="w-7 h-7 bg-white rounded-lg shadow-sm border">+</button>
                                                 </div></div>
                                                 <p className="font-black text-indigo-600 text-sm">{(it.price * it.quantity).toLocaleString()}</p>
                                             </div>
@@ -322,7 +345,6 @@
                             </div>
                         )}
 
-                        {}
                         {activeTab === 'ppob' && (
                              <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in">
                                 <div className="text-center py-6"><h2 className="text-4xl font-black">Listrik & Token</h2></div>
@@ -355,7 +377,6 @@
                             </div>
                         )}
 
-                        {}
                         {activeTab === 'inventory' && (
                             <div className="space-y-6 animate-in fade-in max-w-6xl mx-auto">
                                 <div className="flex justify-between items-center bg-white p-8 rounded-3xl border shadow-xl">
@@ -392,26 +413,52 @@
                             </div>
                         )}
 
-                        {}
                         {activeTab === 'history' && (
                             <div className="space-y-6 animate-in fade-in max-w-6xl mx-auto">
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                                    <StatCard label="Total Omzet" val={sales.reduce((a,b)=>a+(Number(b.total)||0),0)} color="indigo" />
-                                    <StatCard label="Total Laba" val={sales.reduce((a,b)=>a+(Number(b.profit)||0),0)} color="emerald" />
-                                    <StatCard label="Transaksi" val={sales.length} color="amber" noCurrency />
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-2 px-2">
+                                        <i data-lucide="calendar" className="w-5 text-indigo-500"></i>
+                                        <h3 className="font-black text-xs uppercase tracking-widest text-slate-500">Statistik Hari Ini</h3>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                        <StatCard label="Omzet Hari Ini" val={stats.todayRevenue} color="indigo" />
+                                        <StatCard label="Laba Hari Ini" val={stats.todayProfit} color="emerald" />
+                                    </div>
                                 </div>
-                                <div className="bg-white rounded-[2rem] border shadow-sm overflow-hidden">
-                                    <div className="p-6 border-b flex justify-between items-center"><h3 className="font-black uppercase text-xs">Riwayat Transaksi Cloud</h3></div>
+
+                                <div className="space-y-4 pt-4">
+                                    <div className="flex items-center gap-2 px-2">
+                                        <i data-lucide="bar-chart-2" className="w-5 text-slate-400"></i>
+                                        <h3 className="font-black text-xs uppercase tracking-widest text-slate-500">Statistik Keseluruhan</h3>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                                        <StatCard label="Total Omzet" val={stats.totalRevenue} color="slate" />
+                                        <StatCard label="Total Laba" val={stats.totalProfit} color="slate" />
+                                        <StatCard label="Total Transaksi" val={stats.totalTransactions} color="amber" noCurrency />
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-[2rem] border shadow-sm overflow-hidden mt-8">
+                                    <div className="p-6 border-b flex justify-between items-center bg-slate-50/50">
+                                        <h3 className="font-black uppercase text-xs tracking-widest">Riwayat Transaksi Cloud</h3>
+                                        <button onClick={() => {
+                                            const csv = "ID,Waktu,Total,Untung\n" + sales.map(s => `${s.id},${s.timestamp},${s.total},${s.profit}`).join("\n");
+                                            const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'})); a.download = 'Laporan_Alfeen.csv'; a.click();
+                                        }} className="text-[10px] font-black text-indigo-600 bg-white border-2 border-indigo-50 px-6 py-2 rounded-xl shadow-sm hover:bg-indigo-50">EXPORT EXCEL</button>
+                                    </div>
                                     <div className="divide-y divide-slate-50">
                                         {sales.map(s => (
-                                            <div key={s.id} className="p-8 flex justify-between items-center hover:bg-slate-50 transition-colors">
-                                                <div><p className="font-black text-slate-900 text-lg">{s.id}</p><p className="text-[10px] text-slate-400 uppercase font-bold">{new Date(s.timestamp).toLocaleString()}</p></div>
+                                            <div key={s.id} className="p-8 flex justify-between items-center hover:bg-slate-50 transition-colors group">
+                                                <div>
+                                                    <p className="font-black text-slate-900 text-lg tracking-tighter leading-none mb-1 group-hover:text-indigo-600 transition-colors">{s.id}</p>
+                                                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">{new Date(s.timestamp).toLocaleString('id-ID')}</p>
+                                                </div>
                                                 <div className="text-right flex items-center gap-6">
                                                     <div>
-                                                        <p className="font-black text-indigo-600 text-xl">{CURRENCY} {s.total.toLocaleString()}</p>
-                                                        <p className="text-[10px] text-emerald-600 font-bold">Laba: {CURRENCY} {s.profit.toLocaleString()}</p>
+                                                        <p className="font-black text-indigo-600 text-xl tracking-tighter leading-none mb-1">{CURRENCY} {(s.total || 0).toLocaleString()}</p>
+                                                        <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-tight">Laba: {CURRENCY} {(s.profit || 0).toLocaleString()}</p>
                                                     </div>
-                                                    <button onClick={() => setLastReceipt(s)} className="p-3 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all"><i data-lucide="printer"></i></button>
+                                                    <button onClick={() => setLastReceipt(s)} className="p-3 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm"><i data-lucide="printer"></i></button>
                                                 </div>
                                             </div>
                                         ))}
@@ -420,7 +467,6 @@
                             </div>
                         )}
 
-                        {}
                         {activeTab === 'ai' && (
                             <div className="max-w-3xl mx-auto py-16 text-center space-y-12 animate-in slide-in-from-bottom-12">
                                 <div className="space-y-6">
@@ -428,16 +474,16 @@
                                         <i data-lucide="brain-circuit" className="w-14 h-14"></i>
                                     </div>
                                     <h2 className="text-4xl font-black text-slate-950 uppercase tracking-tighter">AI Business Advisor</h2>
-                                    <p className="text-slate-500 font-medium max-w-md mx-auto leading-relaxed text-lg">Konsultan pribadi Anda untuk menganalisis perputaran barang dan keuntungan.</p>
+                                    <p className="text-slate-500 font-medium max-w-md mx-auto leading-relaxed text-lg italic">Analisis otomatis perputaran barang dan profitabilitas warung Anda.</p>
                                 </div>
-                                <button onClick={runAI} disabled={isAiLoading} className="bg-slate-900 text-white px-14 py-6 rounded-[2.5rem] font-black shadow-2xl active:scale-95 transition-all disabled:opacity-50">
-                                    {isAiLoading ? "Menganalisis..." : "Mulai Analisis Sekarang"}
+                                <button onClick={runAI} disabled={isAiLoading} className="bg-slate-900 text-white px-14 py-6 rounded-[2.5rem] font-black shadow-2xl active:scale-95 transition-all disabled:opacity-50 uppercase text-xs tracking-widest">
+                                    {isAiLoading ? "Menganalisis Performa..." : "Mulai Analisis Sekarang"}
                                 </button>
                                 {aiAnalysis && (
                                     <div className="bg-white p-12 rounded-[4rem] border-4 border-white text-left shadow-2xl animate-in zoom-in-95 relative overflow-hidden">
                                         <div className="absolute top-0 right-0 p-10 opacity-5 text-indigo-600"><i data-lucide="brain-circuit" className="w-40 h-40"></i></div>
                                         <div className="flex items-center gap-3 text-indigo-600 font-black uppercase text-[10px] tracking-widest mb-10 bg-indigo-50 w-fit px-6 py-2.5 rounded-2xl border border-indigo-100">
-                                            <i data-lucide="check-circle-2" className="w-4"></i> Laporan Strategi AI
+                                            <i data-lucide="check-circle-2" className="w-4"></i> Laporan Strategi Alfeen Store
                                         </div>
                                         <div className="prose prose-indigo max-w-none text-slate-700 whitespace-pre-wrap font-medium leading-relaxed">
                                             {aiAnalysis}
@@ -448,7 +494,7 @@
                         )}
                     </main>
 
-                    {/* Modal Input Produk */}
+                    {/* Modals remain same as previous version but with optimized IDs */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xl z-[1000] flex items-center justify-center p-6 overflow-y-auto">
                             <form onSubmit={async (e) => {
@@ -484,12 +530,11 @@
                                         <select name="category" defaultValue={editingItem?.category || 'Sembako'} className="w-full p-6 bg-slate-50 rounded-[1.8rem] font-black text-sm border-4 border-transparent"><option>Sembako</option><option>Snack</option><option>Minuman</option><option>Lainnya</option></select>
                                     </div>
                                 </div>
-                                <button type="submit" className="w-full bg-indigo-600 text-white py-7 rounded-[2.5rem] font-black uppercase shadow-2xl active:scale-95 transition-all">SIMPAN PERUBAHAN</button>
+                                <button type="submit" className="w-full bg-indigo-600 text-white py-7 rounded-[2.5rem] font-black uppercase shadow-2xl active:scale-95 transition-all">SIMPAN KE CLOUD</button>
                             </form>
                         </div>
                     )}
 
-                    {}
                     {lastReceipt && (
                         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl z-[2000] flex items-center justify-center p-6 overflow-y-auto">
                             <div className="bg-white w-full max-w-sm rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 my-auto relative">
@@ -497,7 +542,7 @@
                                     <div className="text-center border-b border-dashed border-slate-200 pb-10">
                                         <h2 className="font-black text-3xl uppercase text-indigo-600 mb-2 italic tracking-tighter">{APP_NAME}</h2>
                                         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{APP_ADDRESS}</p>
-                                        <div className="flex justify-between text-[8px] font-black text-slate-300 mt-6 pt-6 border-t border-slate-50 uppercase">
+                                        <div className="flex justify-between text-[8px] font-black text-slate-300 mt-6 pt-6 border-t uppercase tracking-widest">
                                             <span>{lastReceipt.id}</span>
                                             <span>{new Date(lastReceipt.timestamp).toLocaleDateString('id-ID')}</span>
                                         </div>
@@ -505,24 +550,24 @@
                                     <div className="space-y-4 py-2">
                                         {(lastReceipt.items || []).map((it, idx) => (
                                             <div key={idx} className="flex justify-between text-xs items-start">
-                                                <div className="flex-1 pr-6 leading-tight"><p className="font-black">{it.name}</p>
-                                                {it.meterId && <p className="text-[8px] text-indigo-50 font-black mt-1 bg-indigo-600 px-2 py-0.5 rounded leading-none">ID: {it.meterId}</p>}
+                                                <div className="flex-1 pr-6 leading-tight"><p className="font-black text-slate-900">{it.name}</p>
+                                                {it.meterId && <p className="text-[8px] text-indigo-500 font-black mt-1 bg-indigo-600 px-2 py-0.5 rounded leading-none">ID: {it.meterId}</p>}
                                                 <p className="text-[9px] font-bold text-slate-400">{it.quantity} x {it.price.toLocaleString()}</p></div>
-                                                <span className="font-black">{(it.price * it.quantity).toLocaleString()}</span>
+                                                <span className="font-black text-slate-900">{(it.price * it.quantity).toLocaleString()}</span>
                                             </div>
                                         ))}
                                     </div>
                                     <div className="border-t border-dashed border-slate-200 pt-10 space-y-4 font-black">
                                         {lastReceipt.discount > 0 && <div className="flex justify-between text-[11px] text-rose-500 italic"><span>DISKON</span><span>-{lastReceipt.discount.toLocaleString()}</span></div>}
                                         <div className="flex justify-between text-2xl text-indigo-600 tracking-tighter"><span>TOTAL</span><span>{lastReceipt.total.toLocaleString()}</span></div>
-                                        <div className="flex justify-between text-[12px] text-emerald-600 pt-4 border-t border-slate-50 uppercase"><span>KEMBALIAN</span><span>{lastReceipt.change_amount.toLocaleString()}</span></div>
+                                        <div className="flex justify-between text-[12px] text-emerald-600 pt-4 border-t border-slate-50 uppercase tracking-widest"><span>KEMBALIAN</span><span>{lastReceipt.change_amount.toLocaleString()}</span></div>
                                     </div>
                                     <div className="text-center border-t border-dashed pt-6">
-                                        <p className="text-xs font-bold italic">Haturnuhun Tos Balanja</p>
+                                        <p className="text-xs font-bold italic text-slate-800">Haturnuhun Tos Balanja</p>
                                     </div>
                                 </div>
                                 <div className="p-10 bg-slate-50 border-t flex flex-col gap-4">
-                                    <button onClick={downloadReceipt} className="w-full bg-white border-4 border-white shadow-xl py-5 rounded-[1.8rem] font-black text-indigo-600 flex items-center justify-center gap-3 hover:bg-slate-100 transition-all"><i data-lucide="image"></i> Gambar JPEG</button>
+                                    <button onClick={downloadReceipt} className="w-full bg-white border-4 border-white shadow-xl py-5 rounded-[1.8rem] font-black text-indigo-600 flex items-center justify-center gap-3 hover:bg-slate-100 transition-all active:scale-95"><i data-lucide="image"></i> Gambar JPEG</button>
                                     <button onClick={()=>setLastReceipt(null)} className="w-full bg-indigo-600 text-white py-5 rounded-[1.8rem] font-black shadow-2xl active:scale-95 transition-all">TUTUP</button>
                                 </div>
                             </div>
@@ -541,7 +586,17 @@
         );
 
         const StatCard = ({ label, val, color, noCurrency }) => (
-            <div className="bg-white p-10 rounded-[3rem] border-4 border-white shadow-xl relative overflow-hidden group hover:shadow-2xl transition-all"><div className="relative z-10 space-y-4 font-black"><p className="text-[10px] text-slate-400 uppercase tracking-widest">{label}</p><p className={`text-3xl tracking-tighter ${color === 'emerald' ? 'text-emerald-600' : 'text-slate-900'}`}>{!noCurrency && CURRENCY + ' '} {val.toLocaleString()}</p></div></div>
+            <div className={`bg-white p-10 rounded-[3rem] border-4 ${color === 'indigo' ? 'border-indigo-100' : color === 'emerald' ? 'border-emerald-100' : 'border-white'} shadow-xl relative overflow-hidden group hover:shadow-2xl transition-all`}>
+                <div className="relative z-10 space-y-4 font-black">
+                    <p className="text-[10px] text-slate-400 uppercase tracking-widest">{label}</p>
+                    <p className={`text-3xl tracking-tighter ${color === 'emerald' ? 'text-emerald-600' : color === 'indigo' ? 'text-indigo-600' : 'text-slate-900'}`}>
+                        {!noCurrency && CURRENCY + ' '} {(val || 0).toLocaleString()}
+                    </p>
+                </div>
+                <div className="absolute -right-8 -bottom-8 opacity-[0.03] group-hover:scale-110 transition-transform duration-1000">
+                    <i data-lucide={label.includes('Laba') ? 'trending-up' : 'bar-chart-3'} className="w-40 h-40"></i>
+                </div>
+            </div>
         );
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
